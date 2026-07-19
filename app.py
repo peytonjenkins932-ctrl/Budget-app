@@ -4,8 +4,13 @@ import plotly.graph_objects as go
 from datetime import date, timedelta
 import random
 import math
+import json
+
+from streamlit_local_storage import LocalStorage
 
 st.set_page_config(page_title="HomeBudget", page_icon="🏠", layout="centered")
+
+LOCAL_KEY = "homebudget_v31"
 
 MODES = {
     "Dark": {
@@ -118,25 +123,79 @@ def inject_css(mode, accent):
     """
     st.markdown(css, unsafe_allow_html=True)
 
-if "profiles" not in st.session_state:
-    st.session_state["profiles"] = {"Julius": {}, "Peyton": {}}
+def default_state():
+    return {
+        "profiles": {"Julius": {}, "Peyton": {}},
+        "affirmations": DEFAULT_AFFIRMATIONS.copy(),
+        "current_affirmation": DEFAULT_AFFIRMATIONS[0],
+        "profile": "Julius",
+        "mode": "Dark",
+        "theme_name": "Emerald",
+        "month": date.today().strftime("%B"),
+    }
 
-if "affirmations" not in st.session_state:
-    st.session_state["affirmations"] = DEFAULT_AFFIRMATIONS.copy()
+def load_state():
+    ls = LocalStorage()
+    try:
+        raw = ls.getItem(LOCAL_KEY)
+        if not raw:
+            return default_state()
+        if isinstance(raw, str):
+            loaded = json.loads(raw)
+        else:
+            loaded = raw
+        state = default_state()
+        state.update({k: loaded.get(k, state[k]) for k in state.keys()})
+        if "profiles" not in state or not isinstance(state["profiles"], dict):
+            state["profiles"] = {"Julius": {}, "Peyton": {}}
+        if "Julius" not in state["profiles"]:
+            state["profiles"]["Julius"] = {}
+        if "Peyton" not in state["profiles"]:
+            state["profiles"]["Peyton"] = {}
+        if not state.get("affirmations"):
+            state["affirmations"] = DEFAULT_AFFIRMATIONS.copy()
+        if state.get("current_affirmation") not in state["affirmations"]:
+            state["current_affirmation"] = state["affirmations"][0]
+        return state
+    except Exception:
+        return default_state()
 
-if "current_affirmation" not in st.session_state:
-    st.session_state["current_affirmation"] = DEFAULT_AFFIRMATIONS[0]
+def save_state():
+    ls = LocalStorage()
+    payload = {
+        "profiles": st.session_state["profiles"],
+        "affirmations": st.session_state["affirmations"],
+        "current_affirmation": st.session_state["current_affirmation"],
+        "profile": st.session_state["profile"],
+        "mode": st.session_state["mode"],
+        "theme_name": st.session_state["theme_name"],
+        "month": st.session_state["month"],
+    }
+    try:
+        ls.setItem(LOCAL_KEY, json.dumps(payload))
+    except Exception:
+        pass
 
-if "force_random_affirmation" not in st.session_state:
-    st.session_state["force_random_affirmation"] = False
+loaded = load_state()
+
+for k, v in loaded.items():
+    st.session_state.setdefault(k, v)
+
+profile = st.session_state["profile"]
+mode = st.session_state["mode"]
+theme_name = st.session_state["theme_name"]
+accent = THEMES[theme_name]
+inject_css(mode, accent)
 
 with st.sidebar:
     st.markdown("## HomeBudget")
-    profile = st.selectbox("Profile", ["Julius", "Peyton"])
-    mode = st.radio("Mode", ["Dark", "Light"], horizontal=True)
-    theme_name = st.selectbox("Theme", ["Emerald", "Blue", "Purple"])
-    accent = THEMES[theme_name]
-    inject_css(mode, accent)
+    profile = st.selectbox("Profile", ["Julius", "Peyton"], index=["Julius", "Peyton"].index(st.session_state["profile"]))
+    mode = st.radio("Mode", ["Dark", "Light"], horizontal=True, index=["Dark", "Light"].index(st.session_state["mode"]))
+    theme_name = st.selectbox("Theme", ["Emerald", "Blue", "Purple"], index=["Emerald", "Blue", "Purple"].index(st.session_state["theme_name"]))
+
+    st.session_state["profile"] = profile
+    st.session_state["mode"] = mode
+    st.session_state["theme_name"] = theme_name
 
     st.markdown("### Profile tools")
     new_aff = st.text_input("Add affirmation", placeholder="We are in control of our money.")
@@ -149,16 +208,22 @@ with st.sidebar:
             st.session_state["current_affirmation"] = random.choice(st.session_state["affirmations"])
     with c2:
         if st.button("Next"):
-            current = st.session_state["current_affirmation"]
             vals = st.session_state["affirmations"]
+            current = st.session_state["current_affirmation"]
             if current in vals:
                 idx = vals.index(current)
                 st.session_state["current_affirmation"] = vals[(idx + 1) % len(vals)]
             else:
                 st.session_state["current_affirmation"] = vals[0]
 
+    st.caption("Stored affirmations:")
+    st.write(st.session_state["affirmations"])
+
 months = ["January","February","March","April","May","June","July","August","September","October","November","December"]
-current_month = st.selectbox("Month", months, index=months.index(date.today().strftime("%B")))
+month_index = months.index(st.session_state["month"]) if st.session_state["month"] in months else months.index(date.today().strftime("%B"))
+current_month = st.selectbox("Month", months, index=month_index)
+st.session_state["month"] = current_month
+
 year = date.today().year
 month_key = f"{year}-{current_month}"
 
@@ -168,10 +233,10 @@ if month_key not in profile_store:
     profile_store[month_key] = {
         "income": 5833.33 if profile == "Julius" else 4500.0,
         "bills": [
-            {"name": "Rent", "amount": 1275.0 if profile == "Julius" else 1200.0, "due": date.today(), "paid": False},
-            {"name": "Phone", "amount": 200.0 if profile == "Julius" else 150.0, "due": date.today(), "paid": False},
-            {"name": "Water & Electricity", "amount": 180.0, "due": date.today(), "paid": False},
-            {"name": "Groceries", "amount": 600.0 if profile == "Julius" else 500.0, "due": date.today(), "paid": False},
+            {"name": "Rent", "amount": 1275.0 if profile == "Julius" else 1200.0, "paid": False},
+            {"name": "Phone", "amount": 200.0 if profile == "Julius" else 150.0, "paid": False},
+            {"name": "Water & Electricity", "amount": 180.0, "paid": False},
+            {"name": "Groceries", "amount": 600.0 if profile == "Julius" else 500.0, "paid": False},
         ],
         "savings": {
             "Rainy Day": {"goal": 10000.0, "balance": 2000.0, "monthly": 500.0},
@@ -221,13 +286,12 @@ st.markdown("#### Bills")
 bills_total = 0.0
 paid_total = 0.0
 for i, bill in enumerate(month_data["bills"]):
-    c1, c2, c3 = st.columns([3, 2, 1])
+    c1, c2 = st.columns([3, 2])
     with c1:
         bill["name"] = st.text_input("Bill", value=bill["name"], key=f"{profile}_{month_key}_billname_{i}")
     with c2:
         bill["amount"] = st.number_input("Amount", min_value=0.0, step=10.0, value=bill["amount"], key=f"{profile}_{month_key}_billamt_{i}")
-    with c3:
-        bill["paid"] = st.checkbox("Paid", value=bill["paid"], key=f"{profile}_{month_key}_billpaid_{i}")
+    bill["paid"] = st.checkbox(f"Paid: {bill['name']}", value=bill["paid"], key=f"{profile}_{month_key}_billpaid_{i}")
     bills_total += bill["amount"]
     if bill["paid"]:
         paid_total += bill["amount"]
@@ -364,3 +428,5 @@ elif remaining > 0:
 else:
     st.error("This budget is overallocated. Reduce spending or savings.")
 st.markdown("</div>", unsafe_allow_html=True)
+
+save_state()
