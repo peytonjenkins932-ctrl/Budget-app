@@ -3,6 +3,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import date, timedelta
 import random
+import math
 
 st.set_page_config(page_title="HomeBudget", page_icon="🏠", layout="centered")
 
@@ -14,7 +15,6 @@ MODES = {
         "text": "#F8FAFC",
         "muted": "#94A3B8",
         "border": "rgba(148, 163, 184, 0.24)",
-        "input": "rgba(255,255,255,0.04)",
     },
     "Light": {
         "bg": "#F5F7FB",
@@ -23,7 +23,6 @@ MODES = {
         "text": "#0F172A",
         "muted": "#475569",
         "border": "rgba(15, 23, 42, 0.10)",
-        "input": "rgba(15,23,42,0.03)",
     },
 }
 
@@ -40,6 +39,9 @@ DEFAULT_AFFIRMATIONS = [
     "Our budget creates freedom.",
     "We are in control of our money.",
 ]
+
+def money(x):
+    return f"${x:,.2f}"
 
 def inject_css(mode, accent):
     m = MODES[mode]
@@ -116,9 +118,6 @@ def inject_css(mode, accent):
     """
     st.markdown(css, unsafe_allow_html=True)
 
-def money(x):
-    return f"${x:,.2f}"
-
 if "profiles" not in st.session_state:
     st.session_state["profiles"] = {"Julius": {}, "Peyton": {}}
 
@@ -128,8 +127,8 @@ if "affirmations" not in st.session_state:
 if "current_affirmation" not in st.session_state:
     st.session_state["current_affirmation"] = DEFAULT_AFFIRMATIONS[0]
 
-if "random_affirmation_seed" not in st.session_state:
-    st.session_state["random_affirmation_seed"] = 0
+if "force_random_affirmation" not in st.session_state:
+    st.session_state["force_random_affirmation"] = False
 
 with st.sidebar:
     st.markdown("## HomeBudget")
@@ -146,11 +145,10 @@ with st.sidebar:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Random affirmation"):
-            st.session_state["random_affirmation_seed"] += 1
+        if st.button("Random"):
             st.session_state["current_affirmation"] = random.choice(st.session_state["affirmations"])
     with c2:
-        if st.button("Next affirmation"):
+        if st.button("Next"):
             current = st.session_state["current_affirmation"]
             vals = st.session_state["affirmations"]
             if current in vals:
@@ -158,9 +156,6 @@ with st.sidebar:
                 st.session_state["current_affirmation"] = vals[(idx + 1) % len(vals)]
             else:
                 st.session_state["current_affirmation"] = vals[0]
-
-    st.caption("Stored affirmations:")
-    st.write(st.session_state["affirmations"])
 
 months = ["January","February","March","April","May","June","July","August","September","October","November","December"]
 current_month = st.selectbox("Month", months, index=months.index(date.today().strftime("%B")))
@@ -173,10 +168,10 @@ if month_key not in profile_store:
     profile_store[month_key] = {
         "income": 5833.33 if profile == "Julius" else 4500.0,
         "bills": [
-            {"name": "Rent", "amount": 1275.0 if profile == "Julius" else 1200.0, "due": date.today(), "paid": False, "notes": "", "auto": True},
-            {"name": "Phone", "amount": 200.0 if profile == "Julius" else 150.0, "due": date.today(), "paid": False, "notes": "", "auto": True},
-            {"name": "Water & Electricity", "amount": 180.0, "due": date.today(), "paid": False, "notes": "", "auto": False},
-            {"name": "Groceries", "amount": 600.0 if profile == "Julius" else 500.0, "due": date.today(), "paid": False, "notes": "", "auto": False},
+            {"name": "Rent", "amount": 1275.0 if profile == "Julius" else 1200.0, "due": date.today(), "paid": False},
+            {"name": "Phone", "amount": 200.0 if profile == "Julius" else 150.0, "due": date.today(), "paid": False},
+            {"name": "Water & Electricity", "amount": 180.0, "due": date.today(), "paid": False},
+            {"name": "Groceries", "amount": 600.0 if profile == "Julius" else 500.0, "due": date.today(), "paid": False},
         ],
         "savings": {
             "Rainy Day": {"goal": 10000.0, "balance": 2000.0, "monthly": 500.0},
@@ -226,20 +221,17 @@ st.markdown("#### Bills")
 bills_total = 0.0
 paid_total = 0.0
 for i, bill in enumerate(month_data["bills"]):
-    c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
+    c1, c2, c3 = st.columns([3, 2, 1])
     with c1:
         bill["name"] = st.text_input("Bill", value=bill["name"], key=f"{profile}_{month_key}_billname_{i}")
     with c2:
         bill["amount"] = st.number_input("Amount", min_value=0.0, step=10.0, value=bill["amount"], key=f"{profile}_{month_key}_billamt_{i}")
     with c3:
-        bill["due"] = st.date_input("Due", value=bill["due"], key=f"{profile}_{month_key}_billdue_{i}")
-    with c4:
         bill["paid"] = st.checkbox("Paid", value=bill["paid"], key=f"{profile}_{month_key}_billpaid_{i}")
     bills_total += bill["amount"]
     if bill["paid"]:
         paid_total += bill["amount"]
 
-st.markdown("#### Dashboard summary")
 savings_monthly = sum(v["monthly"] for v in month_data["savings"].values())
 left_to_assign = income - bills_total - savings_monthly
 cash_flow = income - bills_total
@@ -293,12 +285,7 @@ st.markdown("### Spending insights")
 
 pie_labels = ["Bills"] + [f"{k} savings" for k in month_data["savings"].keys()]
 pie_values = [bills_total] + [v["monthly"] for v in month_data["savings"].values()]
-fig_pie = px.pie(
-    names=pie_labels,
-    values=pie_values,
-    hole=0.34,
-    color_discrete_sequence=[accent, "#94A3B8", "#60A5FA", "#C084FC"],
-)
+fig_pie = px.pie(names=pie_labels, values=pie_values, hole=0.34, color_discrete_sequence=[accent, "#94A3B8", "#60A5FA", "#C084FC"])
 fig_pie.update_layout(
     margin=dict(t=20, b=0, l=0, r=0),
     paper_bgcolor="rgba(0,0,0,0)",
@@ -308,10 +295,10 @@ fig_pie.update_layout(
 )
 st.plotly_chart(fig_pie, use_container_width=True)
 
-bills_chart = go.Figure()
-bills_chart.add_bar(x=[current_month], y=[bills_total], name="Bills", marker_color=accent)
-bills_chart.add_bar(x=[current_month], y=[savings_monthly], name="Savings", marker_color="#64748B")
-bills_chart.update_layout(
+chart = go.Figure()
+chart.add_bar(x=[current_month], y=[bills_total], name="Bills", marker_color=accent)
+chart.add_bar(x=[current_month], y=[savings_monthly], name="Savings", marker_color="#64748B")
+chart.update_layout(
     barmode="group",
     margin=dict(t=10, b=0, l=0, r=0),
     paper_bgcolor="rgba(0,0,0,0)",
@@ -319,7 +306,7 @@ bills_chart.update_layout(
     font_color=m["text"],
     height=300,
 )
-st.plotly_chart(bills_chart, use_container_width=True)
+st.plotly_chart(chart, use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
